@@ -1,15 +1,26 @@
 import os, json, logging
 from typing import Optional, Dict, Any
-from urllib.parse import urlparse
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine.url import make_url
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import create_engine, text
 
 # ---------------- Logging ----------------
-from sqlalchemy.engine.url import make_url
+logging.basicConfig(level=logging.INFO)
 
+# ---------------- Env vars ----------------
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("Missing DATABASE_URL")
+
+raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+ALLOWED_ORIGINS = [o.strip() for o in raw_origins.split(",") if o.strip()]
+logging.info("ALLOWED_ORIGINS = %r", ALLOWED_ORIGINS)
+
+# Log seguro da connection string (sem quebrar o arranque)
 try:
     u = make_url(DATABASE_URL)
     logging.info("DB -> host=%s port=%s db=%s user=%s",
@@ -17,22 +28,7 @@ try:
 except Exception as e:
     logging.warning("Could not parse DATABASE_URL for logging: %s", e)
 
-# ---------------- Config -----------------
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("Missing DATABASE_URL")
-
-# CORS: lista sem espaços
-raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
-ALLOWED_ORIGINS = [o.strip() for o in raw_origins.split(",") if o.strip()]
-logging.info("ALLOWED_ORIGINS = %r", ALLOWED_ORIGINS)
-
-# Só para veres nos logs a que BD ligaste (sem password)
-u = urlparse(DATABASE_URL)
-logging.info("DB -> host=%s port=%s db=%s user=%s",
-             u.hostname, u.port, (u.path or "/").lstrip("/"), u.username)
-
-# ---------------- Engine -----------------
+# ---------------- SQLAlchemy Engine ----------------
 # Supabase requer SSL
 engine = create_engine(
     DATABASE_URL,
@@ -40,18 +36,26 @@ engine = create_engine(
     connect_args={"sslmode": "require"},
 )
 
-# ---------------- App --------------------
+# ---------------- FastAPI app ----------------
 app = FastAPI(title="Survey Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,   # ex.: ["https://sousabe.github.io", ...]
+    allow_origins=ALLOWED_ORIGINS,   # p.ex.: ["https://sousabe.github.io", "http://127.0.0.1:5500"]
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------- Health & Debug ----------
+# ---------------- Models ----------------
+class Submission(BaseModel):
+    response_id: str
+    submitted_at: str
+    user_agent: Optional[str] = None
+    perfil_2050: Optional[str] = None
+    data: Dict[str, Any]
+
+# ---------------- Health & Debug ----------------
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -82,31 +86,24 @@ def dbg_insert():
         logging.exception("Debug insert failed")
         raise HTTPException(status_code=500, detail="Debug insert failed")
 
-# ---------- Modelo & Submit ----------
-class Submission(BaseModel):
-    response_id: str
-    submitted_at: str
-    user_agent: Optional[str] = None
-    perfil_2050: Optional[str] = None
-    data: Dict[str, Any]
-
+# ---------------- Main submit ----------------
 @app.post("/submit")
 async def submit(payload: Submission, request: Request):
-    sql = text("""
-        insert into responses (perfil_2050, user_agent, data)
-        values (:perfil_2050, :user_agent, :data::jsonb)
-        returning id, submitted_at
-    """)
     try:
-        data_json = json.dumps(payload.data)  # garantir JSON válido
+        data_json = json.dumps(payload.data)      # garantir JSON válido
         ua = payload.user_agent or request.headers.get("user-agent", "")
 
         with engine.begin() as conn:
-            row = conn.execute(sql, {
-                "perfil_2050": payload.perfil_2050,
-                "user_agent": ua[:512],
-                "data": data_json
-            }).mappings().first()
+            row = conn.execute(
+                text("""
+                    insert into responses (perfil_2050, user_agent, data)
+                    values (:perfil_2050, :user_agent, :data::jsonb)
+                    returning id, submitted_at
+                """),
+                {"perfil_2050": payload.perfil_2050,
+                 "user_agent": ua[:512],
+                 "data": data_json},
+            ).mappings().first()
 
         return {"ok": True,
                 "id": str(row["id"]),
@@ -114,4 +111,3 @@ async def submit(payload: Submission, request: Request):
     except Exception:
         logging.exception("DB insert failed")
         raise HTTPException(status_code=500, detail="DB insert failed")
-
