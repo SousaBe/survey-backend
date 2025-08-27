@@ -8,7 +8,14 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 
 # ---------------- Logging ----------------
-logging.basicConfig(level=logging.INFO)
+from sqlalchemy.engine.url import make_url
+
+try:
+    u = make_url(DATABASE_URL)
+    logging.info("DB -> host=%s port=%s db=%s user=%s",
+                 u.host, u.port, u.database, u.username)
+except Exception as e:
+    logging.warning("Could not parse DATABASE_URL for logging: %s", e)
 
 # ---------------- Config -----------------
 DATABASE_URL = os.getenv("DATABASE_URL")
