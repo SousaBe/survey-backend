@@ -62,12 +62,16 @@ def health():
     return {"ok": True}
 
 # ---------------- Main submit ----------------
+from sqlalchemy import create_engine, text, bindparam
+from sqlalchemy.dialects.postgresql import JSONB
+
 @app.post("/submit")
 async def submit(payload: Submission, request: Request):
-    # tipar o parâmetro como JSONB (evita problemas de casting)
+    # Inserimos response_id e evitamos duplicados com ON CONFLICT
     sql = text("""
-        insert into public.responses (perfil_2050, user_agent, data)
-        values (:perfil_2050, :user_agent, :data)
+        insert into public.responses (response_id, perfil_2050, user_agent, data)
+        values (:response_id, :perfil_2050, :user_agent, :data)
+        on conflict (response_id) do nothing
         returning id, submitted_at
     """).bindparams(
         bindparam("data", type_=JSONB)
@@ -76,14 +80,16 @@ async def submit(payload: Submission, request: Request):
     try:
         ua = payload.user_agent or request.headers.get("user-agent", "")
         with engine.begin() as conn:
-            row = conn.execute(
-                sql,
-                {
-                    "perfil_2050": payload.perfil_2050,
-                    "user_agent": ua[:512],
-                    "data": payload.data,  # dict -> JSONB
-                },
-            ).mappings().first()
+            row = conn.execute(sql, {
+                "response_id": payload.response_id,  
+                "perfil_2050": payload.perfil_2050,
+                "user_agent": ua[:512],
+                "data": payload.data,               
+            }).mappings().first()
+
+        if row is None:
+            # conflito (response_id já existia): tratamos como sucesso idempotente
+            return {"ok": True, "duplicate": True}
 
         return {
             "ok": True,
