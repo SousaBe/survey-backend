@@ -61,32 +61,6 @@ class Submission(BaseModel):
 def health():
     return {"ok": True}
 
-@app.get("/debug/db")
-def dbg_db():
-    try:
-        with engine.begin() as c:
-            r = c.execute(
-                text("select now() as now, current_user as usr, current_database() as db")
-            ).mappings().first()
-        return {"ok": True, **dict(r)}
-    except Exception:
-        logging.exception("DB check failed")
-        raise HTTPException(status_code=500, detail="DB check failed")
-
-@app.post("/debug/insert")
-def dbg_insert():
-    try:
-        with engine.begin() as c:
-            r = c.execute(text("""
-                insert into public.responses (perfil_2050, user_agent, data)
-                values ('dbg', 'manual', '{}'::jsonb)
-                returning id
-            """)).mappings().first()
-        return {"ok": True, "id": str(r["id"])}
-    except Exception:
-        logging.exception("Debug insert failed")
-        raise HTTPException(status_code=500, detail="Debug insert failed")
-
 # ---------------- Main submit ----------------
 @app.post("/submit")
 async def submit(payload: Submission, request: Request):
