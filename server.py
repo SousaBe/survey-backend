@@ -89,25 +89,33 @@ def dbg_insert():
 # ---------------- Main submit ----------------
 @app.post("/submit")
 async def submit(payload: Submission, request: Request):
-    try:
-        data_json = json.dumps(payload.data)      # garantir JSON válido
-        ua = payload.user_agent or request.headers.get("user-agent", "")
+    # Nota: sem ::jsonb na SQL; tipamos o parâmetro como JSONB
+    sql = text("""
+        insert into public.responses (perfil_2050, user_agent, data)
+        values (:perfil_2050, :user_agent, :data)
+        returning id, submitted_at
+    """).bindparams(
+        bindparam("data", type_=JSONB)
+    )
 
+    try:
+        ua = payload.user_agent or request.headers.get("user-agent", "")
         with engine.begin() as conn:
             row = conn.execute(
-                text("""
-                    insert into public.responses (perfil_2050, user_agent, data)
-                    values (:perfil_2050, :user_agent, :data::jsonb)
-                    returning id, submitted_at
-                """),
-                {"perfil_2050": payload.perfil_2050,
-                 "user_agent": ua[:512],
-                 "data": data_json},
+                sql,
+                {
+                    "perfil_2050": payload.perfil_2050,
+                    "user_agent": ua[:512],
+                    # passa o dict; SQLAlchemy serializa para jsonb corretamente
+                    "data": payload.data,
+                },
             ).mappings().first()
 
-        return {"ok": True,
-                "id": str(row["id"]),
-                "submitted_at": row["submitted_at"].isoformat()}
+        return {
+            "ok": True,
+            "id": str(row["id"]),
+            "submitted_at": row["submitted_at"].isoformat(),
+        }
     except Exception:
         logging.exception("DB insert failed")
         raise HTTPException(status_code=500, detail="DB insert failed")
