@@ -96,7 +96,7 @@ async def submit(payload: Submission, request: Request):
         with engine.begin() as conn:
             row = conn.execute(
                 text("""
-                    insert into responses (perfil_2050, user_agent, data)
+                    insert into public.responses (perfil_2050, user_agent, data)
                     values (:perfil_2050, :user_agent, :data::jsonb)
                     returning id, submitted_at
                 """),
