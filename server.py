@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any
 
 from sqlalchemy import create_engine, text, bindparam
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSON
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,12 +69,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 async def submit(payload: Submission, request: Request):
     # Inserimos response_id e evitamos duplicados com ON CONFLICT
     sql = text("""
-        insert into public.responses (response_id, perfil_2050, user_agent, data)
-        values (:response_id, :perfil_2050, :user_agent, :data)
-        on conflict (response_id) do nothing
+        insert into public.responses (perfil_2050, user_agent, data)
+        values (:perfil_2050, :user_agent, :data)
         returning id, submitted_at
     """).bindparams(
-        bindparam("data", type_=JSONB)
+        bindparam("data", type_=JSON)   # ← aqui JSON
     )
 
     try:
