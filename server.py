@@ -1,8 +1,9 @@
 import os, json, logging
 from typing import Optional, Dict, Any
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, bindparam
 from sqlalchemy.engine.url import make_url
+from sqlalchemy.dialects.postgresql import JSONB
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +42,7 @@ app = FastAPI(title="Survey Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,   # p.ex.: ["https://sousabe.github.io", "http://127.0.0.1:5500"]
+    allow_origins=ALLOWED_ORIGINS,  # ex.: ["https://sousabe.github.io"]
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,7 +78,7 @@ def dbg_insert():
     try:
         with engine.begin() as c:
             r = c.execute(text("""
-                insert into responses (perfil_2050, user_agent, data)
+                insert into public.responses (perfil_2050, user_agent, data)
                 values ('dbg', 'manual', '{}'::jsonb)
                 returning id
             """)).mappings().first()
@@ -89,7 +90,7 @@ def dbg_insert():
 # ---------------- Main submit ----------------
 @app.post("/submit")
 async def submit(payload: Submission, request: Request):
-    # Nota: sem ::jsonb na SQL; tipamos o parâmetro como JSONB
+    # tipar o parâmetro como JSONB (evita problemas de casting)
     sql = text("""
         insert into public.responses (perfil_2050, user_agent, data)
         values (:perfil_2050, :user_agent, :data)
@@ -106,8 +107,7 @@ async def submit(payload: Submission, request: Request):
                 {
                     "perfil_2050": payload.perfil_2050,
                     "user_agent": ua[:512],
-                    # passa o dict; SQLAlchemy serializa para jsonb corretamente
-                    "data": payload.data,
+                    "data": payload.data,  # dict -> JSONB
                 },
             ).mappings().first()
 
